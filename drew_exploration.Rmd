@@ -1,0 +1,79 @@
+---
+title: "Drew Exploration"
+output: html_notebook
+---
+
+
+```{r}
+# libraries and data
+library(dplyr)
+library(lubridate)
+load('data/bikedata.RData')
+```
+
+
+```{r}
+# convert starttime to datetime
+starttime_times <- ymd_hms(paste(starttime[,1], starttime[,2], starttime[,3], starttime[,4], starttime[,5], starttime[,6], sep= '-'))
+```
+
+```{r}
+# make dataframe
+data <- data.frame(
+  "starttime" = starttime_times,
+  "duration" = duration,
+  "day_of_week" = day_of_week,
+  "days_since_Jan1_2010" = days_since_Jan1_2010,
+  "bikenum" = bikenum,
+  "member" = member,
+  "station_start" = station_start,
+  "station_end" = station_end
+)
+```
+
+```{r}
+# descriptive stats...
+data["route"] <- paste(data$station_start,data$station_end,sep="-")
+summary(data)
+summarise_all(data,n_distinct) %>% t()
+```
+
+```{r}
+# note that not all possible routes are used.
+# there are 144 stations, so 144*144-144 = 20592 possible routes. 
+
+hist(table(data$route),breaks=50,main="routes by # occurrences")
+hist(log10(table(data$route)),breaks=50,main="routes by log10 # occurrences")
+hist(data$duration,breaks=50,main="duration frequency")
+hist(log10(data$duration),breaks=50,main="log10 duration frequency")
+```
+
+```{r}
+# does bikenum actually matter at all? could (multiple) test...
+data_by_bikenum <- data %>% group_by(bikenum) %>% summarise(duration = mean(duration))
+summary(data_by_bikenum$duration)
+```
+
+```{r}
+# what about day of week?
+data_by_dayofweek <- data %>% group_by(day_of_week) %>% summarise(duration = mean(duration))
+data_by_dayofweek <- data_by_dayofweek %>% arrange(factor(data_by_dayofweek$day_of_week,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")))
+barplot(data_by_dayofweek$duration,names=data_by_dayofweek$day_of_week)
+```
+
+
+```{r}
+# time plot is just a blob
+# but we can try average duration by day:
+data_by_day <- data %>% group_by(days_since_Jan1_2010) %>% summarise(duration = mean(duration))
+plot(data_by_day$days_since_Jan1_2010,data_by_day$duration, main = 'mean duration by day')
+```
+
+```{r}
+hist(log10(data$duration[data$member]),col='grey',main="log10 duration frequency")
+hist(log10(data$duration[!data$member]),add=TRUE,col=rgb(red=1,green=0,blue=0,alpha=0.2))
+legend("topright",legend=c('member','nonmember'),fill=c('grey',rgb(red=1,green=0,blue=0,alpha=0.2)))
+```
+
+
+
