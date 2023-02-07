@@ -31,7 +31,7 @@ permute = function(permuations) {
     route.data = subset(data, route == selected.route)
     
     
-    month.pvalues = 1:max(unique(route.data$months_since_Jan_2010)) * 0 # dummy filled
+    month.pvalues = 1:max(unique(route.data$months_since_Jan_2010)) * Inf # dummy filled # inf for min function
     for (time in unique(route.data$months_since_Jan_2010)) {
       baseline = mean(route.data$duration[route.data$months_since_Jan_2010 == time])
       
@@ -43,9 +43,9 @@ permute = function(permuations) {
       }
       
       month.pvalues[time] = pt((baseline - mean(permuted.means)) / sd(permuted.means), permuations + 1)
-      print(month.pvalues[time])
+      
       # quick bonferroni correction
-      month.pvalues[time] = month.pvalues[time] / length(route.data$duration[route.data$months_since_Jan_2010 == time])
+      month.pvalues[time] = month.pvalues[time] * length(route.data$duration[route.data$months_since_Jan_2010 == time])
       
       
     }
@@ -70,10 +70,9 @@ permute.withmodel = function(permutations) {
     route.model = gam(duration ~ starttime + bikenum + member, data=route.data)
     
 
-    month.residuals = 1:max(unique(route.data$months_since_Jan_2010)) * 0 # dummy filled
-    
+    month.pvalues = 1:max(unique(route.data$months_since_Jan_2010)) * Inf # dummy filled
     for (time in unique(route.data$months_since_Jan_2010)) {
-      baseline = mean(route.model[route.data$months_since_Jan_2010 == time])
+      baseline = mean(route.model$residuals[route.data$months_since_Jan_2010 == time])
       
       permuted.means = 1:permuations * 0 # dummy
       for (i in 1:permuations) {
@@ -82,7 +81,8 @@ permute.withmodel = function(permutations) {
       }
       
       month.pvalues[time] = pt((baseline - mean(permuted.means)) / sd(permuted.means), permuations + 1)
-      month.pvalues[time] = month.pvalues[time] / length(route.data$duration[route.data$months_since_Jan_2010 == time])
+      print(month.pvalues[time])
+      month.pvalues[time] = month.pvalues[time] * length(unique(route.data$months_since_Jan_2010))
     }
     
     route.pvalues[j] = min(month.pvalues)
