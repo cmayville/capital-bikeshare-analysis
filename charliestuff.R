@@ -43,8 +43,10 @@ permute = function(permuations) {
       }
       
       month.pvalues[time] = pt((baseline - mean(permuted.means)) / sd(permuted.means), permuations + 1)
+      print(month.pvalues[time])
       # quick bonferroni correction
       month.pvalues[time] = month.pvalues[time] / length(route.data$duration[route.data$months_since_Jan_2010 == time])
+      
       
     }
     # we could just take the min and bonferroni/something correct on that
