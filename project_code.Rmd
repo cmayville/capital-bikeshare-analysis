@@ -1,0 +1,274 @@
+---
+title: "Project Code"
+date: "2/9/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# DATA SETUP
+```{r}
+# libraries and data
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(lubridate)
+library(lfe)
+load('data/bikedata.RData')
+```
+
+```{r}
+# convert starttime to datetime
+starttime_times <- ymd_hms(paste(starttime[,1], starttime[,2], starttime[,3], starttime[,4], starttime[,5], starttime[,6], sep= '-'))
+```
+
+```{r}
+# make dataframe
+data <- data.frame(
+  "starttime" = starttime_times,
+  "duration" = duration,
+  "day_of_week" = day_of_week,
+  "days_since_Jan1_2010" = days_since_Jan1_2010,
+  "bikenum" = bikenum,
+  "member" = member,
+  "station_start" = station_start,
+  "station_end" = station_end
+)
+```
+
+```{r}
+# descriptive stats...
+data["route"] <- paste(data$station_start,data$station_end,sep="-")
+summary(data)
+summarise_all(data,n_distinct) %>% t()
+```
+
+# SOME EXPLORATION
+
+```{r}
+# note that not all possible routes are used.
+# there are 144 stations, so 144*144-144 = 20592 possible routes. 
+
+hist(table(data$route),breaks=50,main="routes by # occurrences")
+hist(log10(table(data$route)),breaks=50,main="routes by log10 # occurrences")
+hist(data$duration,breaks=50,main="duration frequency")
+hist(log10(data$duration),breaks=50,main="log10 duration frequency")
+```
+
+```{r}
+route_freqs <- table(data$route)
+# so how many routes are there with more than:
+length(route_freqs[route_freqs>10])
+length(route_freqs[route_freqs>100])
+length(route_freqs[route_freqs>1000])
+```
+
+
+```{r}
+# does bikenum actually matter at all? could (multiple) test...
+data_by_bikenum <- data %>% group_by(bikenum) %>% summarise(duration = mean(duration))
+summary(data_by_bikenum$duration)
+```
+
+```{r}
+# what about day of week?
+data_by_dayofweek <- data %>% group_by(day_of_week) %>% summarise(duration = mean(duration))
+data_by_dayofweek <- data_by_dayofweek %>% arrange(factor(data_by_dayofweek$day_of_week,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")))
+barplot(data_by_dayofweek$duration,names=data_by_dayofweek$day_of_week)
+```
+
+```{r}
+# what about hour of day (rounded)?
+data['hour'] <- hour(data$starttime)
+data_by_hour <- data %>% group_by(hour) %>% summarise(duration = mean(duration))
+barplot(data_by_hour$duration,names=data_by_hour$hour, title='mean duration by hour')
+```
+
+```{r}
+# month of year
+data['month'] <- month(data$starttime)
+data_by_month <- data %>% group_by(month) %>% summarise(duration = mean(duration))
+barplot(data_by_month$duration,names=data_by_month$month, title='mean duration by month')
+```
+
+```{r}
+# time plot is just a blob
+# but we can try average duration by day:
+data_by_day <- data %>% group_by(days_since_Jan1_2010) %>% summarise(duration = mean(duration))
+plot(data_by_day$days_since_Jan1_2010,data_by_day$duration, main = 'mean duration by day')
+```
+
+```{r}
+# try average duration by month
+data['months_since_Jan_2010'] <- 12*(year(data$starttime)-2010)+month(data$starttime)
+data_by_months <- data %>% group_by(months_since_Jan_2010) %>% summarise(duration = mean(duration))
+plot(data_by_months$months_since_Jan_2010,data_by_months$duration, main = 'mean duration by month')
+```
+
+
+```{r}
+# compare member and nonmember
+hist(log10(data$duration[data$member]),col='grey',main="log10 duration frequency")
+hist(log10(data$duration[!data$member]),add=TRUE,col=rgb(red=1,green=0,blue=0,alpha=0.2))
+legend("topright",legend=c('member','nonmember'),fill=c('grey',rgb(red=1,green=0,blue=0,alpha=0.2)))
+```
+
+# PERMUTATIONS
+
+## NON ADJUSTED (SIMPLE)
+```{r}
+permute = function(permuations) {
+  j = 1
+  route.pvalues = 1:length(unique(data$route)) * 0 # dummy
+  
+  for (selected.route in unique(data$route)) {
+    route.data = subset(data, route == selected.route)
+    
+    
+    month.pvalues = 1:max(unique(route.data$months_since_Jan_2010)) * Inf # dummy filled # inf for min function
+    for (time in unique(route.data$months_since_Jan_2010)) {
+      baseline = mean(route.data$duration[route.data$months_since_Jan_2010 == time])
+      
+      # permutation time
+      permuted.means = 1:permuations * 0 # dummy
+      for (i in 1:permuations) {
+        random.durations = sample(route.data$duration, length(route.data$duration[route.data$months_since_Jan_2010 == time])) 
+        permuted.means[i] = mean(random.durations)
+      }
+      
+      month.pvalues[time] = 2 * pnorm(abs((baseline - mean(permuted.means)) / sd(permuted.means)), lower.tail=FALSE)
+      # quick bonferroni correction
+      month.pvalues[time] = month.pvalues[time] * length(unique(route.data$months_since_Jan_2010))
+      
+      
+    }
+    
+    route.pvalues[j] = min(month.pvalues)
+    j = j + 1
+  }
+  
+  return(route.pvalues)
+  
+}
+
+no_model = permute(100)
+# bonferroni 
+no_model.bonferroni = p.adjust(no_model, method="bonferroni")
+length(no_model.bonferroni[no_model.bonferroni < 0.05])
+# holm
+no_model.holm = p.adjust(no_model, method="holm")
+length(no_model.holm[no_model.holm < 0.05])
+```
+
+## ADJUSTED
+```{r}
+permute.withmodel = function(permutations) {
+  j = 1
+  route.pvalues = 1:length(unique(data$route)) * 0 # dummy
+  
+  for (selected.route in unique(data$route)) {
+    selected.route = data$route[1]
+    route.data = subset(data, route == selected.route)
+    
+    # train a model
+    route.model = gam(duration ~ (starttime) + (bikenum) + (member), data=route.data)
+    
+
+    month.pvalues = 1:max(unique(route.data$months_since_Jan_2010)) * Inf # dummy filled
+    for (time in unique(route.data$months_since_Jan_2010)) {
+      baseline = sum(route.model$residuals[route.data$months_since_Jan_2010 == time]^2, na.rm=TRUE)
+      
+      permuted.means = 1:permuations * 0 # dummy
+      for (i in 1:permuations) {
+        random.residuals = sample(na.omit(route.model$residuals), length(random.data$duration))
+        permuted.means[i] = sum(random.residuals^2, na.rm=TRUE)
+      }
+      
+      month.pvalues[time] = pnorm(abs((baseline - mean(permuted.means)) / sd(permuted.means)), lower.tail=FALSE)
+      month.pvalues[time] = month.pvalues[time] * length(unique(route.data$months_since_Jan_2010))
+    }
+    
+    route.pvalues[j] = min(month.pvalues)
+    j = j + 1
+  }
+  
+  return(route.pvalues)
+}
+
+with_model = permute.withmodel(100)
+# bonferroni 
+with_model.bonferroni = p.adjust(with_model, method="bonferroni")
+length(with_model.bonferroni[with_model.bonferroni < 0.05])
+# holm
+with_model.holm = p.adjust(with_model, method="holm")
+length(no_model.holm[with_model.holm < 0.05])
+```
+
+
+
+# FIXED EFFECTS MODEL
+
+```{r}
+# as an example, try month*route fixed effects linear model
+
+# note: model is rank-deficient when we also include month. high-dim!
+fixedeffects_lm <- felm(duration~member+day_of_week+factor(hour) | factor(route):factor(months_since_Jan_2010),data)
+summary(fixedeffects_lm)
+```
+
+```{r}
+# now we have ~93000 fixed effect estimates, one for each route*month
+month_route_fe <- getfe(fixedeffects_lm)
+month_route_fe <- separate(month_route_fe, idx, c("route", "months_since_Jan_2010"), sep = "[.]")
+mean(month_route_fe$effect)
+sqrt(var(month_route_fe$effect))
+month_route_fe <- left_join(
+  month_route_fe,
+  month_route_fe %>% group_by(route) %>% summarise(
+    mean_effect = mean(effect),
+    route_stderr=(var(effect)**0.5)/sqrt(n()),
+    route_n = n()
+  ),by="route")
+month_route_fe['effect_deviation'] <- month_route_fe$effect-month_route_fe$mean_effect
+month_route_fe['effect_relative_deviation'] <- month_route_fe$effect_deviation/month_route_fe$mean_effect
+hist(log10(month_route_fe$effect_deviation),breaks=50,main='log10 deviation from mean route effect')
+hist(month_route_fe$effect_relative_deviation,breaks=50,main='proportion of mean route effect')
+```
+
+```{r}
+# for example, the following 1,417 month-route combinations have an associated fixed effect more than 100% of mean for that route across months, or less than 10% of mean for that route across months
+month_route_fe %>% filter(month_route_fe$effect_relative_deviation<(-.9)|(month_route_fe$effect_relative_deviation>1)) %>% select(effect_relative_deviation,route,months_since_Jan_2010)
+```
+```{r}
+# look at the first example (route 31001-31008) - we get a big deviation in average route duration for month 9, controlling for membership, day of the week, and hour of the day
+plot(data$months_since_Jan_2010[data$route=="31001-31008"],data$duration[data$route=="31001-31008"], main='ride durations on 31001-31008')
+```
+
+```{r}
+# but let's select the relevant deviations in a more principled way, accounting for multiple testing and number of obs (but still doesn't correct for obs per effect...).
+month_route_fe <- month_route_fe %>% mutate(
+  t_statistic = (effect-mean_effect)/route_stderr)
+month_route_fe['p_value'] <- 2*pt(  # two-tailed one-sample t-test
+  q=month_route_fe$t_statistic,
+  df=month_route_fe$route_n,
+  lower.tail=FALSE)
+cutoff_p <- 0.05/length(month_route_fe)  # Bonferroni
+cutoff_p
+nrow(month_route_fe %>% filter(p_value<cutoff_p))  # number discoveries
+month_route_fe %>% filter(p_value<cutoff_p) %>% filter(route=="31001-31008")
+```
+
+```{r}
+# use Holm-Bonferroni
+month_route_fe['p_value_hb'] <- p.adjust(month_route_fe$p_value,method="holm")
+nrow(month_route_fe %>% filter(p_value_hb<cutoff_p))  # number discoveries
+month_route_fe %>% filter(p_value_hb<cutoff_p) %>% filter(route=="31007-31009")
+```
+
+```{r}
+month_route_fe %>% filter(p_value_hb<cutoff_p)
+```
+
