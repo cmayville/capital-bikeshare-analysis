@@ -109,11 +109,19 @@ hist(log10(data$duration[!data$member]),add=TRUE,col=rgb(red=1,green=0,blue=0,al
 legend("topright",legend=c('member','nonmember'),fill=c('grey',rgb(red=1,green=0,blue=0,alpha=0.2)))
 ```
 
-```{r}
-# as an example, try month*route fixed effects linear model
 
-# note: model is rank-deficient when we also include month. high-dim!
-fixedeffects_lm <- felm(duration~member+day_of_week+factor(hour) | factor(route):factor(months_since_Jan_2010),data)
+```{r}
+# month*route fixed effects linear model
+
+data_by_month <- data %>% group_by(month) %>% summarise(mean_month_duration = mean(duration))
+data<-left_join(data,data_by_month,by='month')
+data['demeaned_duration'] <- data$duration-data$mean_month_duration
+
+data_by_route <- data %>% group_by(route) %>% summarise(mean_route_duration = mean(duration))
+data<-left_join(data,data_by_route,by='route')
+data['demeaned_duration'] <- data$demeaned_duration-data$mean_route_duration
+
+fixedeffects_lm <- felm(demeaned_duration~member+day_of_week+factor(hour) | factor(route):factor(months_since_Jan_2010),data)
 summary(fixedeffects_lm)
 ```
 
@@ -173,7 +181,7 @@ month_route_fe %>% filter(p_value_hb<cutoff_p)
 
 ```{r}
 # basic permutation: permute durations of each route
-permutations <- 2  # number permutations. each takes ~10 seconds
+permutations <- 3  # number permutations. each takes ~10 seconds
 data_list <- group_split(data, route)
 data_permuted <- vector(mode='list', length=permutations)
 for (i in 1:permutations){
@@ -226,4 +234,85 @@ compare_obs_null['p_value_hb'] <- p.adjust(compare_obs_null$p_value,method="holm
 nrow(compare_obs_null %>% filter(p_value_hb<cutoff_p))  # number discoveries
 compare_obs_null %>% filter(p_value_hb<cutoff_p) %>% filter(route=="31007-31009")
 ```
+
+```{r}
+# there are 92,588 month-route combinations.
+
+month_route_fe <- month_route_fe %>% mutate(
+  discoveries_bonf = ifelse(p_value<0.05,1,0),
+  discoveries_hb = ifelse(p_value_hb<0.05,1,0))
+compare_obs_null <- compare_obs_null %>% mutate(
+  discoveries_bonf = ifelse(p_value<0.05,1,0),
+  discoveries_hb = ifelse(p_value_hb<0.05,1,0))
+
+# calculate discovery proportion with alpha=0.05 for each method:
+sum(month_route_fe$discoveries_bonf,na.rm=TRUE)/nrow(month_route_fe)
+sum(month_route_fe$discoveries_hb,na.rm=TRUE)/nrow(month_route_fe)
+sum(compare_obs_null$discoveries_bonf,na.rm=TRUE)/nrow(compare_obs_null)
+sum(compare_obs_null$discoveries_hb,na.rm=TRUE)/nrow(compare_obs_null)
+
+# we might expect to see clustering of discoveries both in route...
+fe_bonf <- month_route_fe %>% group_by(route) %>% summarise(
+  n_discoveries=sum(discoveries_bonf,na.rm=TRUE),
+  n_months=n())
+hist(fe_bonf$n_discoveries)
+fe_hb <- month_route_fe %>% group_by(route) %>% summarise(
+  n_discoveries=sum(discoveries_hb,na.rm=TRUE),
+  n_months=n())
+hist(fe_hb$n_discoveries)
+perm_bonf <- compare_obs_null %>% group_by(route) %>% summarise(
+  n_discoveries=sum(discoveries_bonf,na.rm=TRUE),
+  n_months=n())
+hist(perm_bonf$n_discoveries)
+perm_hb <- compare_obs_null %>% group_by(route) %>% summarise(
+  n_discoveries=sum(discoveries_hb,na.rm=TRUE),
+  n_months=n())
+hist(perm_hb$n_discoveries)
+
+# not idempotent!
+fe_bonf <- left_join(fe_bonf,summarise(group_by(data,route),route_n=n()),by='route')
+fe_hb <- left_join(fe_hb,summarise(group_by(data,route),route_n=n()),by='route')
+perm_bonf <- left_join(perm_bonf,summarise(group_by(data,route),route_n=n()),by='route')
+perm_hb <- left_join(perm_hb,summarise(group_by(data,route),route_n=n()),by='route')
+
+```
+```{r}
+# ... and in time
+
+fe_bonf_bymonth <- month_route_fe %>% group_by(months_since_Jan_2010) %>% summarise(
+  prop_discoveries_bonf = sum(discoveries_bonf,na.rm=TRUE)/n(),
+  prop_discoveries_bh = sum(discoveries_hb,na.rm=TRUE)/n()) %>% arrange(as.integer(months_since_Jan_2010))
+barplot(fe_bonf_bymonth$prop_discoveries_bonf,names.arg=fe_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery')
+barplot(fe_bonf_bymonth$prop_discoveries_bh,names.arg=fe_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery')
+
+perm_bonf_bymonth <- compare_obs_null %>% group_by(months_since_Jan_2010) %>% summarise(
+  prop_discoveries_bonf = sum(discoveries_bonf,na.rm=TRUE)/n(),
+  prop_discoveries_bh = sum(discoveries_hb,na.rm=TRUE)/n()) %>% arrange(as.integer(months_since_Jan_2010))
+barplot(perm_bonf_bymonth$prop_discoveries_bonf,names.arg=perm_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery')
+barplot(perm_bonf_bymonth$prop_discoveries_bh,names.arg=perm_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery')
+
+```
+
+```{r}
+# other
+
+fe_bonf_months <- fe_bonf %>% group_by(n_months) %>% summarise(mean_discoveries = mean(n_discoveries))
+barplot(fe_bonf_months$mean_discoveries,names.arg = fe_bonf_months$n_months)
+plot(fe_bonf$route_n,fe_bonf$n_discoveries)
+
+fe_hb_months <- fe_hb %>% group_by(n_months) %>% summarise(mean_discoveries = mean(n_discoveries))
+barplot(fe_hb_months$mean_discoveries,names.arg = fe_hb_months$n_months)
+plot(fe_hb$route_n,fe_hb$n_discoveries)
+
+perm_bonf_months <- perm_bonf %>% group_by(n_months) %>% summarise(mean_discoveries = mean(n_discoveries))
+barplot(perm_bonf_months$mean_discoveries,names.arg = perm_bonf_months$n_months)
+plot(perm_bonf$route_n,perm_bonf$n_discoveries)
+
+perm_hb_months <- perm_hb %>% group_by(n_months) %>% summarise(mean_discoveries = mean(n_discoveries))
+barplot(perm_hb_months$mean_discoveries,names.arg = perm_hb_months$n_months)
+plot(perm_hb$route_n,perm_hb$n_discoveries)
+```
+
+
+
 
