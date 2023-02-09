@@ -1,3 +1,3 @@
-# captial-bikeshare-analysis
+# capital-bikeshare-analysis
 
-See `project_code.Rmd` for data analysis. 
+Run `project_code.Rmd` for data analysis, results, and visualizations. 
