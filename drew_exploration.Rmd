@@ -151,23 +151,26 @@ compare_obs_null <- left_join(
   obs_routemonth,
   null_routemonth %>% group_by(route) %>% summarise(
     route_mean=mean(mean_duration),
-    route_std=var(mean_duration)**0.5,
+    route_stderr=var(mean_duration)**0.5,
     route_n = n()),
   by='route')
 compare_obs_null <- compare_obs_null %>% mutate(
-  z_statistic = (mean_duration-route_mean)/route_std)
+  z_statistic = (mean_duration-route_mean)/route_stderr)
 compare_obs_null['p_value'] <- 2*pnorm(q=-abs(compare_obs_null$z_statistic))
-cutoff_p <- 0.05/length(compare_obs_null)  # Bonferroni
-cutoff_p
-nrow(compare_obs_null %>% filter(p_value<cutoff_p))  # number discoveries
-compare_obs_null %>% filter(p_value<cutoff_p) %>% filter(route=="31007-31009")
+
+alpha=0.05
+
+# Bonferroni
+compare_obs_null['p_value_bonf'] <- p.adjust(compare_obs_null$p_value,method="bonferroni")
+nrow(compare_obs_null %>% filter(p_value_bonf<alpha))  # number discoveries
+compare_obs_null %>% filter(p_value_bonf<alpha) %>% filter(route=="31007-31009")
 ```
 
 ```{r}
-# use Holm-Bonferroni
+# Holm-Bonferroni
 compare_obs_null['p_value_hb'] <- p.adjust(compare_obs_null$p_value,method="holm")
-nrow(compare_obs_null %>% filter(p_value_hb<cutoff_p))  # number discoveries
-compare_obs_null %>% filter(p_value_hb<cutoff_p) %>% filter(route=="31007-31009")
+nrow(compare_obs_null %>% filter(p_value_hb<alpha))  # number discoveries
+compare_obs_null %>% filter(p_value_hb<alpha) %>% filter(route=="31007-31009")
 ```
 
 ### Linear Fixed Effects
@@ -215,17 +218,20 @@ month_route_fe <- month_route_fe %>% mutate(
 month_route_fe['p_value'] <- 2*pt(  # two-tailed
   q=-abs(month_route_fe$t_statistic),
   df=month_route_fe$route_n)
-cutoff_p <- 0.05/length(month_route_fe)  # Bonferroni
-cutoff_p
-nrow(month_route_fe %>% filter(p_value<cutoff_p))  # number discoveries
-month_route_fe %>% filter(p_value<cutoff_p) %>% filter(route=="31007-31009")
+
+alpha = 0.05
+
+# Bonferroni
+month_route_fe['p_value_bonf'] <- p.adjust(month_route_fe$p_value,method="bonferroni")
+nrow(month_route_fe %>% filter(p_value_bonf<alpha))  # number discoveries
+month_route_fe %>% filter(p_value_bonf<alpha) %>% filter(route=="31007-31009")
 ```
 
 ```{r}
-# use Holm-Bonferroni
+# Holm-Bonferroni
 month_route_fe['p_value_hb'] <- p.adjust(month_route_fe$p_value,method="holm")
-nrow(month_route_fe %>% filter(p_value_hb<cutoff_p))  # number discoveries
-month_route_fe %>% filter(p_value_hb<cutoff_p) %>% filter(route=="31007-31009")
+nrow(month_route_fe %>% filter(p_value_hb<alpha))  # number discoveries
+month_route_fe %>% filter(p_value_hb<alpha) %>% filter(route=="31007-31009")
 ```
 
 ### Analyze Results
@@ -234,11 +240,11 @@ month_route_fe %>% filter(p_value_hb<cutoff_p) %>% filter(route=="31007-31009")
 # there are 92,588 month-route combinations.
 
 month_route_fe <- month_route_fe %>% mutate(
-  discoveries_bonf = ifelse(p_value<0.05,1,0),
-  discoveries_hb = ifelse(p_value_hb<0.05,1,0))
+  discoveries_bonf = ifelse(p_value_bonf<alpha,1,0),
+  discoveries_hb = ifelse(p_value_hb<alpha,1,0))
 compare_obs_null <- compare_obs_null %>% mutate(
-  discoveries_bonf = ifelse(p_value<0.05,1,0),
-  discoveries_hb = ifelse(p_value_hb<0.05,1,0))
+  discoveries_bonf = ifelse(p_value_bonf<alpha,1,0),
+  discoveries_hb = ifelse(p_value_hb<alpha,1,0))
 
 # calculate discovery proportion with alpha=0.05 for each method:
 sum(month_route_fe$discoveries_bonf,na.rm=TRUE)/nrow(month_route_fe)
@@ -278,13 +284,13 @@ fe_bonf_bymonth <- month_route_fe %>% group_by(months_since_Jan_2010) %>% summar
   prop_discoveries_bonf = sum(discoveries_bonf,na.rm=TRUE)/n(),
   prop_discoveries_bh = sum(discoveries_hb,na.rm=TRUE)/n()) %>% arrange(as.integer(months_since_Jan_2010))
 barplot(fe_bonf_bymonth$prop_discoveries_bonf,names.arg=fe_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main='fixed effect bonferroni')
-barplot(fe_bonf_bymonth$prop_discoveries_bh,names.arg=fe_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main='fixed effect BH')
+barplot(fe_bonf_bymonth$prop_discoveries_bh,names.arg=fe_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main='Discoveries by route via fixed effect with BH correction')
 
 perm_bonf_bymonth <- compare_obs_null %>% group_by(months_since_Jan_2010) %>% summarise(
   prop_discoveries_bonf = sum(discoveries_bonf,na.rm=TRUE)/n(),
   prop_discoveries_bh = sum(discoveries_hb,na.rm=TRUE)/n()) %>% arrange(as.integer(months_since_Jan_2010))
 barplot(perm_bonf_bymonth$prop_discoveries_bonf,names.arg=perm_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main = 'permutation bonferroni')
-barplot(perm_bonf_bymonth$prop_discoveries_bh,names.arg=perm_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main = 'permutation BH')
+barplot(perm_bonf_bymonth$prop_discoveries_bh,names.arg=perm_bonf_bymonth$months_since_Jan_2010,xlab='months after Jan 2010',ylab = 'proportion of routes with discovery',main = 'Discoveries by route via simple permutation with BH correction')
 ```
 
 
@@ -309,9 +315,9 @@ plot(perm_hb$route_n,perm_hb$n_discoveries,main='permutation BH',xlab='number of
 ```
 
 ```{r}
-plot(log10(month_route_fe$effect),log10(month_route_fe$p_value),main='fixed effect plain p values',xlab='log10 route/month effect',ylab='log10 p value')
+plot(log10(month_route_fe$effect),log10(month_route_fe$p_value_bonf),main='fixed effect Bonferroni',xlab='log10 route/month effect',ylab='log10 Bonferroni-corrected p value')
 plot(log10(month_route_fe$effect),log10(month_route_fe$p_value_hb),main='fixed effect BH',xlab='log10 mean route effect',ylab='log10 BH-corrected p value')
-plot(log10(compare_obs_null$mean_duration),log10(compare_obs_null$p_value),main='permutation plain p values',xlab='log10 mean route/month duration',ylab='log10 p value')
+plot(log10(compare_obs_null$mean_duration),log10(compare_obs_null$p_value_bonf),main='permutation Bonferroni',xlab='log10 mean route/month duration',ylab='log10 Bonferroni-corrected p value')
 plot(log10(compare_obs_null$mean_duration),log10(compare_obs_null$p_value_hb),main='permutation BH',xlab='log10 mean route/month duration',ylab='log10 BH-corrected p value')
 ```
 
